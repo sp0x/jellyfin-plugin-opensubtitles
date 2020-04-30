@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Globalization;
 using System.IO;
 using System.Linq;
@@ -30,7 +31,8 @@ namespace Jellyfin.Plugin.OpenSubtitles
         private DateTime _lastLogin;
         private int _rateLimitLeft = 40;
 
-        public OpenSubtitleDownloader(ILogger<OpenSubtitleDownloader> logger, IFileSystem fileSystem, IHttpClient httpClient)
+        public OpenSubtitleDownloader(ILogger<OpenSubtitleDownloader> logger, IFileSystem fileSystem,
+            IHttpClient httpClient)
         {
             _logger = logger;
             _fileSystem = fileSystem;
@@ -45,7 +47,7 @@ namespace Jellyfin.Plugin.OpenSubtitles
             => Plugin.Instance.Configuration;
 
         public IEnumerable<VideoContentType> SupportedMediaTypes
-            => new[] { VideoContentType.Episode, VideoContentType.Movie };
+            => new[] {VideoContentType.Episode, VideoContentType.Movie};
 
         public Task<SubtitleResponse> GetSubtitles(string id, CancellationToken cancellationToken)
             => GetSubtitlesInternal(id, GetOptions(), cancellationToken);
@@ -60,13 +62,13 @@ namespace Jellyfin.Plugin.OpenSubtitles
                 throw new ArgumentNullException(nameof(id));
             }
 
-            var idParts = id.Split(new[] { '-' }, 3);
+            var idParts = id.Split(new[] {'-'}, 3);
 
             var format = idParts[0];
             var language = idParts[1];
             var ossId = idParts[2];
 
-            var downloadsList = new[] { int.Parse(ossId, _usCulture) };
+            var downloadsList = new[] {int.Parse(ossId, _usCulture)};
 
             await Login(cancellationToken).ConfigureAwait(false);
 
@@ -79,7 +81,9 @@ namespace Jellyfin.Plugin.OpenSubtitles
             {
                 await Task.Delay(1000);
             }
-            var downloadResponse = await OpenSubtitlesHandler.OpenSubtitles.DownloadSubtitlesAsync(downloadsList, cancellationToken).ConfigureAwait(false);
+
+            var downloadResponse = await OpenSubtitlesHandler.OpenSubtitles
+                .DownloadSubtitlesAsync(downloadsList, cancellationToken).ConfigureAwait(false);
 
             var downloadResult = downloadResponse.Item1;
             _rateLimitLeft = downloadResponse.Item2 ?? _rateLimitLeft;
@@ -123,7 +127,6 @@ namespace Jellyfin.Plugin.OpenSubtitles
             {
                 Format = format,
                 Language = language,
-
                 Stream = new MemoryStream(Utilities.Decompress(new MemoryStream(data)))
             };
         }
@@ -138,7 +141,8 @@ namespace Jellyfin.Plugin.OpenSubtitles
             var options = GetOptions();
             if (options.Username.Length == 0 || options.Password.Length == 0)
             {
-                _logger.LogWarning("The username or password has no value. Attempting to access the service without an account.");
+                _logger.LogWarning(
+                    "The username or password has no value. Attempting to access the service without an account.");
                 return;
             }
 
@@ -157,6 +161,7 @@ namespace Jellyfin.Plugin.OpenSubtitles
             {
                 throw new Exception("Authentication to OpenSubtitles failed.");
             }
+
             _rateLimitLeft = loginResponse.Item2 == null ? _rateLimitLeft : (int)loginResponse.Item2;
             _lastLogin = DateTime.UtcNow;
         }
@@ -174,11 +179,7 @@ namespace Jellyfin.Plugin.OpenSubtitles
 
             var results = ((MethodResponseGetSubLanguages)result).Languages;
 
-            return results.Select(i => new NameIdPair
-            {
-                Name = i.LanguageName,
-                Id = i.SubLanguageID
-            });
+            return results.Select(i => new NameIdPair {Name = i.LanguageName, Id = i.SubLanguageID});
         }
 
         private static string NormalizeLanguage(string language)
@@ -192,7 +193,8 @@ namespace Jellyfin.Plugin.OpenSubtitles
             return language;
         }
 
-        public async Task<IEnumerable<RemoteSubtitleInfo>> Search(SubtitleSearchRequest request, CancellationToken cancellationToken)
+        async Task<IEnumerable<RemoteSubtitleInfo>> ISubtitleProvider.Search(SubtitleSearchRequest request,
+            CancellationToken cancellationToken)
         {
             var imdbIdText = request.GetProviderId(MetadataProviders.Imdb);
             long imdbId = 0;
@@ -200,11 +202,13 @@ namespace Jellyfin.Plugin.OpenSubtitles
             switch (request.ContentType)
             {
                 case VideoContentType.Episode:
-                    if (!request.IndexNumber.HasValue || !request.ParentIndexNumber.HasValue || string.IsNullOrEmpty(request.SeriesName))
+                    if (!request.IndexNumber.HasValue || !request.ParentIndexNumber.HasValue ||
+                        string.IsNullOrEmpty(request.SeriesName))
                     {
                         _logger.LogDebug("Episode information missing");
                         return Enumerable.Empty<RemoteSubtitleInfo>();
                     }
+
                     break;
                 case VideoContentType.Movie:
                     if (string.IsNullOrEmpty(request.Name))
@@ -212,11 +216,15 @@ namespace Jellyfin.Plugin.OpenSubtitles
                         _logger.LogDebug("Movie name missing");
                         return Enumerable.Empty<RemoteSubtitleInfo>();
                     }
-                    if (string.IsNullOrWhiteSpace(imdbIdText) || !long.TryParse(imdbIdText.TrimStart('t'), NumberStyles.Any, _usCulture, out imdbId))
+
+                    if (string.IsNullOrWhiteSpace(imdbIdText) || !long.TryParse(imdbIdText.TrimStart('t'),
+                        NumberStyles.Any, _usCulture, out imdbId))
                     {
+                        _logger.LogDebug($"Imdb id: `{imdbIdText}` - media name: {request.Name}");
                         _logger.LogDebug("Imdb id missing");
-                        return Enumerable.Empty<RemoteSubtitleInfo>();
+                        //return Enumerable.Empty<RemoteSubtitleInfo>();
                     }
+
                     break;
             }
 
@@ -238,31 +246,51 @@ namespace Jellyfin.Plugin.OpenSubtitles
 
             var fileInfo = _fileSystem.GetFileInfo(request.MediaPath);
             var movieByteSize = fileInfo.Length;
-            var searchImdbId = request.ContentType == VideoContentType.Movie ? imdbId.ToString(_usCulture) : "";
-            var subtitleSearchParameters = request.ContentType == VideoContentType.Episode
-                ? new List<SubtitleSearchParameters> {
-                                                         new SubtitleSearchParameters(subLanguageId,
-                                                             query: request.SeriesName,
-                                                             season: request.ParentIndexNumber.Value.ToString(_usCulture),
-                                                             episode: request.IndexNumber.Value.ToString(_usCulture))
-                                                     }
-                : new List<SubtitleSearchParameters> {
-                                                         new SubtitleSearchParameters(subLanguageId, imdbid: searchImdbId),
-                                                         new SubtitleSearchParameters(subLanguageId, query: request.Name, imdbid: searchImdbId)
-                                                     };
-            var parms = new List<SubtitleSearchParameters> {
-                                                               new SubtitleSearchParameters( subLanguageId,
-                                                                   movieHash: hash,
-                                                                   movieByteSize: movieByteSize,
-                                                                   imdbid: searchImdbId ),
-                                                           };
+            //For movies, the imdb id is ued.
+            var searchImdbId = request.ContentType == VideoContentType.Movie && imdbId!=0 ? imdbId.ToString(_usCulture) : "";
+            var subtitleSearchParameters = new List<SubtitleSearchParameters>();
+            switch (request.ContentType)
+            {
+                case VideoContentType.Episode:
+                    subtitleSearchParameters = new List<SubtitleSearchParameters>
+                    {
+                        new SubtitleSearchParameters(subLanguageId,
+                            query: request.SeriesName,
+                            season: request.ParentIndexNumber.Value.ToString(_usCulture),
+                            episode: request.IndexNumber.Value.ToString(_usCulture))
+                    };
+                    break;
+                case VideoContentType.Movie:
+                    subtitleSearchParameters = new List<SubtitleSearchParameters> { };
+                    if (!string.IsNullOrEmpty(searchImdbId))
+                    {
+                        subtitleSearchParameters.Add(new SubtitleSearchParameters(subLanguageId, imdbid: searchImdbId));
+                        subtitleSearchParameters.Add(new SubtitleSearchParameters(subLanguageId, query: request.Name, imdbid: searchImdbId));
+                    }
+                    else
+                    {
+                        subtitleSearchParameters.Add(new SubtitleSearchParameters(subLanguageId, query: request.Name));
+                    }
+
+                    break;
+            }
+
+            var parms = new List<SubtitleSearchParameters>
+            {
+                new SubtitleSearchParameters(subLanguageId,
+                    movieHash: hash,
+                    movieByteSize: movieByteSize,
+                    imdbid: searchImdbId),
+            };
             parms.AddRange(subtitleSearchParameters);
 
             if (_rateLimitLeft == 0)
             {
                 await Task.Delay(1000);
             }
-            var searchResponse = await OpenSubtitlesHandler.OpenSubtitles.SearchSubtitlesAsync(parms.ToArray(), cancellationToken).ConfigureAwait(false);
+
+            var searchResponse = await OpenSubtitlesHandler.OpenSubtitles
+                .SearchSubtitlesAsync(parms.ToArray(), cancellationToken).ConfigureAwait(false);
 
             var searchResult = searchResponse.Item1;
             _rateLimitLeft = searchResponse.Item2 ?? _rateLimitLeft;
@@ -281,41 +309,57 @@ namespace Jellyfin.Plugin.OpenSubtitles
                 return Enumerable.Empty<RemoteSubtitleInfo>();
             }
 
-            Predicate<SubtitleSearchResult> mediaFilter =
-                x =>
-                    request.ContentType == VideoContentType.Episode
-                        ? !string.IsNullOrEmpty(x.SeriesSeason) && !string.IsNullOrEmpty(x.SeriesEpisode) &&
-                          int.Parse(x.SeriesSeason, _usCulture) == request.ParentIndexNumber &&
-                          int.Parse(x.SeriesEpisode, _usCulture) == request.IndexNumber
-                        : !string.IsNullOrEmpty(x.IDMovieImdb) && long.Parse(x.IDMovieImdb, _usCulture) == imdbId;
+            Predicate<SubtitleSearchResult> mediaFilter =  x =>
+                {
+                    switch (request.ContentType)
+                    {
+                        case VideoContentType.Episode:
+                            return !string.IsNullOrEmpty(x.SeriesSeason) && !string.IsNullOrEmpty(x.SeriesEpisode) &&
+                                   int.Parse(x.SeriesSeason, _usCulture) == request.ParentIndexNumber &&
+                                   int.Parse(x.SeriesEpisode, _usCulture) == request.IndexNumber;
+                        case VideoContentType.Movie:
+                            if (imdbId == 0)
+                            {
+                                return x.MovieName.Contains(request.Name);
+                            }
+                            else
+                            {
+                                return !string.IsNullOrEmpty(x.IDMovieImdb) &&
+                                       long.Parse(x.IDMovieImdb, _usCulture) == imdbId;
+                            }
+                    }
+                    return false;
+                };
+
 
             var results = ((MethodResponseSubtitleSearch)searchResult).Results;
 
             // Avoid implicitly captured closure
             var hasCopy = hash;
 
-            return results.Where(x => x.SubBad == "0" && mediaFilter(x) && (!request.IsPerfectMatch || string.Equals(x.MovieHash, hash, StringComparison.OrdinalIgnoreCase)))
-                    .OrderBy(x => (string.Equals(x.MovieHash, hash, StringComparison.OrdinalIgnoreCase) ? 0 : 1))
-                    .ThenBy(x => Math.Abs(long.Parse(x.MovieByteSize, _usCulture) - movieByteSize))
-                    .ThenByDescending(x => int.Parse(x.SubDownloadsCnt, _usCulture))
-                    .ThenByDescending(x => double.Parse(x.SubRating, _usCulture))
-                    .Select(i => new RemoteSubtitleInfo
-                    {
-                        Author = i.UserNickName,
-                        Comment = i.SubAuthorComment,
-                        CommunityRating = float.Parse(i.SubRating, _usCulture),
-                        DownloadCount = int.Parse(i.SubDownloadsCnt, _usCulture),
-                        Format = i.SubFormat,
-                        ProviderName = Name,
-                        ThreeLetterISOLanguageName = i.SubLanguageID,
-
-                        Id = i.SubFormat + "-" + i.SubLanguageID + "-" + i.IDSubtitleFile,
-
-                        Name = i.SubFileName,
-                        DateCreated = DateTime.Parse(i.SubAddDate, _usCulture),
-                        IsHashMatch = i.MovieHash == hasCopy
-
-                    }).Where(i => !string.Equals(i.Format, "sub", StringComparison.OrdinalIgnoreCase) && !string.Equals(i.Format, "idx", StringComparison.OrdinalIgnoreCase));
+            return results.Where(x =>
+                    x.SubBad == "0" && mediaFilter(x) &&
+                    (!request.IsPerfectMatch || string.Equals(x.MovieHash, hash, StringComparison.OrdinalIgnoreCase)))
+                .OrderBy(x => (string.Equals(x.MovieHash, hash, StringComparison.OrdinalIgnoreCase) ? 0 : 1))
+                .ThenBy(x => Math.Abs(long.Parse(x.MovieByteSize, _usCulture) - movieByteSize))
+                .ThenByDescending(x => int.Parse(x.SubDownloadsCnt, _usCulture))
+                .ThenByDescending(x => double.Parse(x.SubRating, _usCulture))
+                .Select(i => new RemoteSubtitleInfo
+                {
+                    Author = i.UserNickName,
+                    Comment = i.SubAuthorComment,
+                    CommunityRating = float.Parse(i.SubRating, _usCulture),
+                    DownloadCount = int.Parse(i.SubDownloadsCnt, _usCulture),
+                    Format = i.SubFormat,
+                    ProviderName = Name,
+                    ThreeLetterISOLanguageName = i.SubLanguageID,
+                    Id = i.SubFormat + "-" + i.SubLanguageID + "-" + i.IDSubtitleFile,
+                    Name = i.SubFileName,
+                    DateCreated = DateTime.Parse(i.SubAddDate, _usCulture),
+                    IsHashMatch = i.MovieHash == hasCopy
+                }).Where(i =>
+                    !string.Equals(i.Format, "sub", StringComparison.OrdinalIgnoreCase) &&
+                    !string.Equals(i.Format, "idx", StringComparison.OrdinalIgnoreCase));
         }
     }
 }
