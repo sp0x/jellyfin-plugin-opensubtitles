@@ -4,6 +4,7 @@ using System.Diagnostics;
 using System.Globalization;
 using System.IO;
 using System.Linq;
+using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using Jellyfin.Plugin.OpenSubtitles.Configuration;
@@ -193,12 +194,19 @@ namespace Jellyfin.Plugin.OpenSubtitles
             return language;
         }
 
+        private string ToDump(object output)
+        {
+            var tout = JsonSerializer.Serialize(output);
+            return tout;
+        }
+
         async Task<IEnumerable<RemoteSubtitleInfo>> ISubtitleProvider.Search(SubtitleSearchRequest request,
             CancellationToken cancellationToken)
         {
             var imdbIdText = request.GetProviderId(MetadataProviders.Imdb);
             long imdbId = 0;
-
+            _logger.LogDebug($"{ToDump(request)}");
+            _logger.LogDebug($"Imdb id: {imdbIdText}");
             switch (request.ContentType)
             {
                 case VideoContentType.Episode:
@@ -288,24 +296,40 @@ namespace Jellyfin.Plugin.OpenSubtitles
             {
                 await Task.Delay(1000);
             }
-
-            var searchResponse = await OpenSubtitlesHandler.OpenSubtitles
-                .SearchSubtitlesAsync(parms.ToArray(), cancellationToken).ConfigureAwait(false);
-
-            var searchResult = searchResponse.Item1;
-            _rateLimitLeft = searchResponse.Item2 ?? _rateLimitLeft;
-
-            if (searchResponse.Item2 != null)
+            _logger.LogDebug($"Search params: {ToDump(parms)}");
+            IMethodResponse searchResult = null;
+            try
             {
-                if (_rateLimitLeft <= 4)
+                var searchResponse = await OpenSubtitlesHandler.OpenSubtitles
+                    .SearchSubtitlesAsync(parms.ToArray(), cancellationToken)
+                    .ConfigureAwait(false);
+                searchResult = searchResponse.Item1;
+                _logger.LogDebug($"Search result: {ToDump(searchResult)}");
+                _rateLimitLeft = searchResponse.Item2 ?? _rateLimitLeft;
+                if (searchResponse.Item2 != null)
                 {
-                    await Task.Delay(250);
+                    if (_rateLimitLeft <= 4)
+                    {
+                        await Task.Delay(250);
+                    }
                 }
             }
+            catch (Exception ex)
+            {
+                _logger.LogError($"Error while fetching subtitles from opensubtitles.\n{ex}\n{ex.StackTrace}");
+            }
+
 
             if (!(searchResult is MethodResponseSubtitleSearch))
             {
                 _logger.LogError("Invalid response type");
+                return Enumerable.Empty<RemoteSubtitleInfo>();
+            }
+
+            //Check if we got a 401 error from opensubtitles
+            if (searchResult.Status.Contains("401"))
+            {
+                _logger.LogError("Not authorized to OpenSubtitles");
                 return Enumerable.Empty<RemoteSubtitleInfo>();
             }
 
