@@ -22,6 +22,7 @@ using System.IO;
 using System.Linq;
 using System.Net;
 using System.Text;
+using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using MediaBrowser.Common.Net;
@@ -145,6 +146,13 @@ namespace OpenSubtitlesHandler
             var result = SendRequestAsync(request, userAgent, CancellationToken.None).Result;
             return result.Item1;
         }
+        
+        private static string ToJson(object output)
+        {
+            var tout = JsonSerializer.Serialize(output);
+            return tout;
+        }
+
 
         public static async Task<(Stream, int?, HttpStatusCode)> SendRequestAsync(byte[] request, string userAgent, CancellationToken cancellationToken)
         {
@@ -167,6 +175,7 @@ namespace OpenSubtitlesHandler
             {
                 options.UserAgent = "xmlrpc-epi-php/0.2 (PHP)";
             }
+            //System.Console.WriteLine($"Request options: {ToJson(options)}");
             var result = await HttpClient.Post(options).ConfigureAwait(false);
 
             IEnumerable<string> values;

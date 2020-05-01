@@ -115,7 +115,9 @@ namespace OpenSubtitlesHandler
 
             //File.WriteAllText(".\\request.txt", Encoding.UTF8.GetString(XmlRpcGenerator.Generate(call)));
             // Send the request to the server
-            var httpResponse = await Utilities.SendRequestAsync(XmlRpcGenerator.Generate(call), XML_PRC_USERAGENT, cancellationToken)
+            var data = XmlRpcGenerator.Generate(call);
+            //System.Console.WriteLine(Encoding.UTF8.GetString(XmlRpcGenerator.Generate(call)));
+            var httpResponse = await Utilities.SendRequestAsync(data, XML_PRC_USERAGENT, cancellationToken)
                 .ConfigureAwait(false);
 
             string response = Utilities.GetStreamString(httpResponse.Item1);

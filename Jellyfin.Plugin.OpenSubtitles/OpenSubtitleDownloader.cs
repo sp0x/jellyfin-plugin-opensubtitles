@@ -157,12 +157,15 @@ namespace Jellyfin.Plugin.OpenSubtitles
             {
                 await Task.Delay(1000);
             }
-
+            //_logger.LogDebug($"Login response: {ToDump(loginResponse.Item1)}");
             if (!(loginResponse.Item1 is MethodResponseLogIn))
             {
                 throw new Exception("Authentication to OpenSubtitles failed.");
             }
-
+            if (loginResponse.Item1.Status.Contains("401"))
+            {
+                throw new Exception("Authentication to OpenSubtitles failed. Call was Unathorized.");
+            }
             _rateLimitLeft = loginResponse.Item2 == null ? _rateLimitLeft : (int)loginResponse.Item2;
             _lastLogin = DateTime.UtcNow;
         }
@@ -206,7 +209,7 @@ namespace Jellyfin.Plugin.OpenSubtitles
             var imdbIdText = request.GetProviderId(MetadataProviders.Imdb);
             long imdbId = 0;
             _logger.LogDebug($"{ToDump(request)}");
-            _logger.LogDebug($"Imdb id: {imdbIdText}");
+            //_logger.LogDebug($"Imdb id: {imdbIdText}");
             switch (request.ContentType)
             {
                 case VideoContentType.Episode:
@@ -228,7 +231,7 @@ namespace Jellyfin.Plugin.OpenSubtitles
                     if (string.IsNullOrWhiteSpace(imdbIdText) || !long.TryParse(imdbIdText.TrimStart('t'),
                         NumberStyles.Any, _usCulture, out imdbId))
                     {
-                        _logger.LogDebug($"Imdb id: `{imdbIdText}` - media name: {request.Name}");
+                        //_logger.LogDebug($"Imdb id: `{imdbIdText}` - media name: {request.Name}");
                         _logger.LogDebug("Imdb id missing");
                         //return Enumerable.Empty<RemoteSubtitleInfo>();
                     }
@@ -296,7 +299,7 @@ namespace Jellyfin.Plugin.OpenSubtitles
             {
                 await Task.Delay(1000);
             }
-            _logger.LogDebug($"Search params: {ToDump(parms)}");
+            //_logger.LogDebug($"Search params: {ToDump(parms)}");
             IMethodResponse searchResult = null;
             try
             {
@@ -304,7 +307,7 @@ namespace Jellyfin.Plugin.OpenSubtitles
                     .SearchSubtitlesAsync(parms.ToArray(), cancellationToken)
                     .ConfigureAwait(false);
                 searchResult = searchResponse.Item1;
-                _logger.LogDebug($"Search result: {ToDump(searchResult)}");
+                //_logger.LogDebug($"Search result: {ToDump(searchResult)}");
                 _rateLimitLeft = searchResponse.Item2 ?? _rateLimitLeft;
                 if (searchResponse.Item2 != null)
                 {
